@@ -12,7 +12,7 @@ namespace rs2
     std::map<int, std::vector<uint8_t>> create_default_fw_table();
     std::vector<int> parse_fw_version(const std::string& fw);
     bool is_upgradeable(const std::string& curr, const std::string& available);
-    bool is_recommended_fw_available();
+    bool is_recommended_fw_available(std::string version);
 
     class firmware_update_manager : public process_manager
     {
@@ -22,7 +22,8 @@ namespace rs2
               _fw(fw), _is_signed(is_signed), _dev(dev), _ctx(ctx) {}
 
     private:
-        void process_flow(std::function<void()> cleanup) override;
+        void process_flow(std::function<void()> cleanup, 
+            invoker invoke) override;
         bool check_for(
             std::function<bool()> action, std::function<void()> cleanup,
             std::chrono::system_clock::duration delta);

@@ -15,15 +15,18 @@
 
 #ifdef INTERNAL_FW
 #include "common/fw/D4XX_FW_Image.h"
+#include "common/fw/D4XX_RC_Image.h"
 #include "common/fw/SR3XX_FW_Image.h"
 #else
 #define FW_D4XX_FW_IMAGE_VERSION ""
+#define FW_D4XX_RC_IMAGE_VERSION ""
 #define FW_SR3XX_FW_IMAGE_VERSION ""
 const char* fw_get_D4XX_FW_Image(int) { return NULL; }
+const char* fw_get_D4XX_RC_Image(int) { return NULL; }
 const char* fw_get_SR3XX_FW_Image(int) { return NULL; }
 #endif // INTERNAL_FW
 
-constexpr const char* recommended_fw_url = "https://downloadcenter.intel.com/download/27522/Latest-Firmware-for-Intel-RealSense-D400-Product-Family?v=t";
+constexpr const char* recommended_fw_url = "https://dev.intelrealsense.com/docs/firmware-releases";
 
 namespace rs2
 {
@@ -35,16 +38,12 @@ namespace rs2
         RS2_FWU_STATE_FAILED = 3,
     };
 
-    bool is_recommended_fw_available()
+    bool is_recommended_fw_available(std::string id)
     {
-        return !(strcmp("", FW_D4XX_FW_IMAGE_VERSION) == 0);
+        auto pl = parse_product_line(id);
+        auto fv = get_available_firmware_version(pl);
+        return !(fv == "");
     }
-
-    static std::map<int, std::string> product_line_to_fw =
-    {
-        {RS2_PRODUCT_LINE_D400, FW_D4XX_FW_IMAGE_VERSION},
-        {RS2_PRODUCT_LINE_SR300, FW_SR3XX_FW_IMAGE_VERSION},
-    };
 
     int parse_product_line(std::string id)
     {
@@ -55,20 +54,32 @@ namespace rs2
 
     std::string get_available_firmware_version(int product_line)
     {
-        auto it = product_line_to_fw.find(product_line);
-        if (it != product_line_to_fw.end())
-            return it->second;
-        return "";
+        bool allow_rc_firmware = config_file::instance().get_or_default(configurations::update::allow_rc_firmware, false);
+
+        if (product_line == RS2_PRODUCT_LINE_D400 && allow_rc_firmware) return FW_D4XX_RC_IMAGE_VERSION;
+        else if (product_line == RS2_PRODUCT_LINE_D400) return FW_D4XX_FW_IMAGE_VERSION;
+        //else if (product_line == RS2_PRODUCT_LINE_SR300) return FW_SR3XX_FW_IMAGE_VERSION;
+        else return "";
     }
 
     std::map<int, std::vector<uint8_t>> create_default_fw_table()
     {
+        bool allow_rc_firmware = config_file::instance().get_or_default(configurations::update::allow_rc_firmware, false);
+
         std::map<int, std::vector<uint8_t>> rv;
 
-        if ("" != FW_D4XX_FW_IMAGE_VERSION)
+        if ("" != FW_D4XX_FW_IMAGE_VERSION && !allow_rc_firmware)
         {
             int size = 0;
             auto hex = fw_get_D4XX_FW_Image(size);
+            auto vec = std::vector<uint8_t>(hex, hex + size);
+            rv[RS2_PRODUCT_LINE_D400] = vec;
+        }
+
+        if ("" != FW_D4XX_RC_IMAGE_VERSION && allow_rc_firmware)
+        {
+            int size = 0;
+            auto hex = fw_get_D4XX_RC_Image(size);
             auto vec = std::vector<uint8_t>(hex, hex + size);
             rv[RS2_PRODUCT_LINE_D400] = vec;
         }
@@ -159,13 +170,17 @@ namespace rs2
         return false;
     }
 
-    void firmware_update_manager::process_flow(std::function<void()> cleanup)
+    void firmware_update_manager::process_flow(
+        std::function<void()> cleanup,
+        invoker invoke)
     {
         std::string serial = "";
-        if (_dev.supports(RS2_CAMERA_INFO_ASIC_SERIAL_NUMBER))
-            serial = _dev.get_info(RS2_CAMERA_INFO_ASIC_SERIAL_NUMBER);
+        if (_dev.supports(RS2_CAMERA_INFO_FIRMWARE_UPDATE_ID))
+            serial = _dev.get_info(RS2_CAMERA_INFO_FIRMWARE_UPDATE_ID);
         else
-            serial = _dev.query_sensors().front().get_info(RS2_CAMERA_INFO_ASIC_SERIAL_NUMBER);
+            serial = _dev.query_sensors().front().get_info(RS2_CAMERA_INFO_FIRMWARE_UPDATE_ID);
+
+        _model.related_notifications.clear();
 
         _progress = 5;
 
@@ -211,9 +226,9 @@ namespace rs2
                             auto d = devs[j];
                             if (d.is<update_device>())
                             {
-                                if (d.supports(RS2_CAMERA_INFO_ASIC_SERIAL_NUMBER))
+                                if (d.supports(RS2_CAMERA_INFO_FIRMWARE_UPDATE_ID))
                                 {
-                                    if (serial == d.get_info(RS2_CAMERA_INFO_ASIC_SERIAL_NUMBER))
+                                    if (serial == d.get_info(RS2_CAMERA_INFO_FIRMWARE_UPDATE_ID))
                                     {
                                         dfu = d;
                                         return true;
@@ -271,9 +286,9 @@ namespace rs2
                 {
                     auto d = devs[j];
 
-                    if (d.query_sensors().size() && d.query_sensors().front().supports(RS2_CAMERA_INFO_ASIC_SERIAL_NUMBER))
+                    if (d.query_sensors().size() && d.query_sensors().front().supports(RS2_CAMERA_INFO_FIRMWARE_UPDATE_ID))
                     {
-                        auto s = d.query_sensors().front().get_info(RS2_CAMERA_INFO_ASIC_SERIAL_NUMBER);
+                        auto s = d.query_sensors().front().get_info(RS2_CAMERA_INFO_FIRMWARE_UPDATE_ID);
                         if (s == serial)
                         {
                             log("Discovered connection of the original device");
@@ -424,7 +439,7 @@ namespace rs2
 
     void fw_update_notification_model::draw_expanded(ux_window& win, std::string& error_message)
     {
-        if (update_manager->started() && update_state == RS2_FWU_STATE_INITIAL_PROMPT) 
+        if (update_manager->started() && update_state == RS2_FWU_STATE_INITIAL_PROMPT)
             update_state = RS2_FWU_STATE_IN_PROGRESS;
 
         auto flags = ImGuiWindowFlags_NoResize |

@@ -183,6 +183,8 @@ namespace librealsense
             CASE(UPDATABLE)
             CASE(UPDATE_DEVICE)
             CASE(GLOBAL_TIMER)
+            CASE(L500_DEPTH_SENSOR)
+            CASE(TM2_SENSOR)
         default: assert(!is_valid(value)); return UNKNOWN_VALUE;
         }
 #undef CASE
@@ -354,6 +356,7 @@ namespace librealsense
             CASE(PRODUCT_LINE)
             CASE(USB_TYPE_DESCRIPTOR)
             CASE(ASIC_SERIAL_NUMBER)
+            CASE(FIRMWARE_UPDATE_ID)
         default: assert(!is_valid(value)); return UNKNOWN_VALUE;
         }
 #undef CASE
