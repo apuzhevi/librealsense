@@ -6,6 +6,7 @@
 #include "os.h"
 #include "ux-window.h"
 #include "fw-update-helper.h"
+#include "remote-source.h"
 
 #include <cstdarg>
 #include <thread>
@@ -30,7 +31,13 @@
 
 using namespace rs2;
 using namespace rs400;
+remote_frame_source remote;
 
+void add_remote_device(context& ctx, std::string address) {
+	remote.start("127.0.0.1", "\\\\.\\pipe\\DepthStream");
+	std::shared_ptr<rs2_context> rsctx=ctx.operator std::shared_ptr<rs2_context>();	
+	rs2_context_add_software_device(rsctx.get(), remote.get_device(), NULL);
+}
 void add_playback_device(context& ctx, device_models_list& device_models, 
     std::string& error_message, viewer_model& viewer_model, const std::string& file)
 {
@@ -264,10 +271,10 @@ int main(int argc, const char** argv) try
 
     std::vector<device> connected_devs;
     std::mutex m;
-
+	add_remote_device(ctx, "127.0.0.1");
     window.on_file_drop = [&](std::string filename)
     {
-        std::string error_message{};
+        
         add_playback_device(ctx, *device_models, error_message, viewer_model, filename);
         if (!error_message.empty())
         {

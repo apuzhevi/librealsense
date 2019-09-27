@@ -2,14 +2,15 @@
 // Copyright(c) 2015 Intel Corporation. All Rights Reserved.
 
 #include <librealsense2/rs.hpp>
-#include <iostream>
-#include <fstream>
+
 
 #include "tclap/CmdLine.h"
 #include "parser.hpp"
 #include "auto-complete.h"
 
 #include <string>
+#include <iostream>
+#include <fstream>
 
 
 using namespace std;
