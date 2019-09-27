@@ -15,6 +15,7 @@ add_subdirectory(convert)
 add_subdirectory(enumerate-devices)
 add_subdirectory(fw-logger)
 add_subdirectory(terminal)
+add_subdirectory(stream-server)
 add_subdirectory(recorder)
 add_subdirectory(fw-update)
 
