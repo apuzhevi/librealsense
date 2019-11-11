@@ -34,7 +34,11 @@ using namespace rs400;
 remote_frame_source remote;
 
 void add_remote_device(context& ctx, std::string address) {
+#if defined(_WIN32)
 	remote.start("127.0.0.1", "\\\\.\\pipe\\DepthStream");
+#else    
+	remote.start("127.0.0.1", "/tmp/DUStream");
+#endif
 	std::shared_ptr<rs2_context> rsctx=ctx.operator std::shared_ptr<rs2_context>();	
 	rs2_context_add_software_device(rsctx.get(), remote.get_device(), NULL);
 }
