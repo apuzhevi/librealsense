@@ -9,6 +9,13 @@
 #include <sstream>
 #include <functional>
 #include <thread>
+#include <string>
+#include <list> 
+#include <iostream>
+#include <iomanip>
+#include <cassert>
+
+#include <pthread.h>
 
 #if defined(_WIN32)
   #include <windows.h> 
@@ -26,6 +33,9 @@
 #include <librealsense2/hpp/rs_internal.hpp>
 #include <mutex>
 
+#include "environment.h"
+#include "rtspconnectionclient.h"
+
 #if 1
 const int W = 640;
 const int H = 480;
@@ -36,19 +46,56 @@ const int H = 720;
 const int BPP = 2;
 #endif
 
+struct Frame
+{
+	Frame(char* buffer, int size, timeval timestamp) : m_buffer(buffer), m_size(size), m_timestamp(timestamp) {};
+	Frame(const Frame&);
+	Frame& operator=(const Frame&);
+	~Frame()  { delete [] m_buffer; };
+	
+	char* m_buffer;
+	unsigned int m_size;
+	timeval m_timestamp;
+};
+
+pthread_mutex_t mutex = {0};
+std::list<Frame*> captureQueue;
+unsigned int queueSize = 42;
+
+void another_fn() {
+ 	class MyCallback : public RTSPConnection::Callback
+	{
+		public:
+			virtual bool    onData(const char* id, unsigned char* buffer, ssize_t size, struct timeval presentationTime) {
+				std::cout << id << " " << size << " ts:" << presentationTime.tv_sec << "." << presentationTime.tv_usec << std::endl;
+
+				pthread_mutex_lock (&mutex);
+				if (captureQueue.size() >= queueSize) {
+					std::cout << "Queue full size drop frame size:"  << (int)captureQueue.size() << std::endl;
+				} else {
+					captureQueue.push_back(new Frame((char*)buffer, size, presentationTime));	
+				}
+				pthread_mutex_unlock (&mutex);
+
+				return true;
+			}
+	};
+
+	Environment env;
+	MyCallback cb;
+//	RTSPConnection rtspClient(env, &cb, "rtsp://10.12.145.38:8554/unicast"); // PC
+	RTSPConnection rtspClient(env, &cb, "rtsp://10.12.145.54:8554/unicast"); // pi
+	env.mainloop();
+	return;
+}
+
 namespace rs2
 {
-	void deleter(void* p) {
+	void deleter(void* p) {}
 
-	}
-	class remote_frame_source
-	{
-
+	class remote_frame_source {
 	public:
-		remote_frame_source()
-		{
-
-
+		remote_frame_source() {
 			depth_frame.bpp = BPP;
 			depth_frame.stride = BPP * W;
 			pixels.resize(depth_frame.stride * H, 0);
@@ -56,8 +103,8 @@ namespace rs2
 			dev = rs2_create_software_device(NULL);
 			depth_frame.deleter = &deleter;
 			create_sensors();
-
 		}
+
 		virtual ~remote_frame_source() {
 #if defined(_WIN32)			
 			CloseHandle(hPipe);
@@ -65,12 +112,9 @@ namespace rs2
 			close(fd);
 #endif
 			rs2_delete_device(dev);
-
 		}
 
-
-		rs2_intrinsics get_intrinsics()
-		{
+		rs2_intrinsics get_intrinsics() {
 			rs2_intrinsics intrinsics = { W, H,
 				(float)W / 2, (float)H / 2,
 				(float)W / 2, (float)H / 2,
@@ -78,6 +122,7 @@ namespace rs2
 
 			return intrinsics;
 		}
+				
 		void start(std::string address, std::string stream_name) {
 			if (is_active)
 				return;
@@ -86,16 +131,21 @@ namespace rs2
 				stream_name.c_str(),
 				GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
 #else
+/*
 			int fifo = mkfifo(stream_name.c_str(), 0666);
 			fd = open(stream_name.c_str(), O_RDONLY);
 			int ret = fcntl(fd, F_SETPIPE_SZ, 1024*1024);
 			if (ret < 0) {
 				std::cout << "ERR: Set pipe size - " << std::strerror(errno) << std::endl;
 			}
+*/						
 #endif			
-			t = std::thread{ &remote_frame_source::thread_main, this };
+			r = std::thread(another_fn); // start RTSP
+			t = std::thread{ &remote_frame_source::thread_main, this }; // start reading
+	
 			is_active = true;
 		}
+
 		void stop() {
 			if (!is_active)
 				return;
@@ -104,7 +154,7 @@ namespace rs2
 #if defined(_WIN32)			
 			CloseHandle(hPipe);
 #else
-			close(fd);
+			// close(fd);
 #endif
 		}
 
@@ -127,24 +177,36 @@ namespace rs2
 			depth_stream = rs2_software_sensor_add_video_stream(depth_sensor, st, NULL);
 			depth_frame.profile = depth_stream;
 		}
-		void read_frame()
-		{
+
+		void read_frame() {
 			std::lock_guard<std::mutex> lck(mtx);
 #if defined(_WIN32)
 			{
 				DWORD bytesRead = 0;
 				if (ReadFile(hPipe, depth_frame.pixels, W * H * BPP, &bytesRead, NULL)) {
 #else
+/*
 			int nbytes = 0;
 			ioctl(fd, FIONREAD, &nbytes);
 			if (nbytes >= W*H*BPP) {
 				int bytesRead = read(fd, depth_frame.pixels, W * H * BPP);
 				if (bytesRead != -1) {
-#endif				
-					std::cout << " Read: " << bytesRead << " Bytes from buffer!" << std::endl;
+*/
+			{
+				pthread_mutex_lock (&mutex);
+				if (captureQueue.empty()) {
+					std::cout << "Queue is empty" << std::endl;		
+				} else {				
+					std::cout << "Got the frame" << std::endl;
+
+					Frame * frame = captureQueue.front();
+					captureQueue.pop_front();
+			
+					memcpy(depth_frame.pixels, frame->m_buffer, frame->m_size);
+					// delete frame;
 				}
-				else
-					std::cerr << "Cannot read from buffer!" << std::endl;
+				pthread_mutex_unlock (&mutex);
+#endif				
 
 				using namespace std::chrono;
 				auto now = system_clock::now();
@@ -153,11 +215,12 @@ namespace rs2
 	
 				depth_frame.frame_number++;
 			}
-
 		}
+
 		void thread_main() {
 			while (is_active) {
 				read_frame();
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
 			}
 		}
 		bool is_active = false;
@@ -176,10 +239,7 @@ namespace rs2
 		rs2_software_video_frame depth_frame;
 		std::vector<uint8_t> pixels;
 		std::thread t;
+		std::thread r;
 		std::mutex mtx;
-
 	};
-
-
-
 }
