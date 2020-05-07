@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "RsRtspClient.h"
-#include "RsSink.h"
-
-#include "software-device.h"
 #include <librealsense2/rs.hpp>
+#include <librealsense2/hpp/rs_internal.hpp>
 
-#include <NetdevLog.h>
+#include <RsCommon.h>
+#include <RsNetDevLog.h>
+
+#include <queue>
 
 const int RTP_QUEUE_MAX_SIZE = 30;
 
@@ -89,8 +89,7 @@ public:
     {
         while(!frames_queue.empty())
         {
-            Raw_Frame* frame = frames_queue.front();
-            get_memory_pool().returnMem((unsigned char*)frame->m_buffer - sizeof(RsFrameHeader));
+            frame_deleter(frames_queue.front());
             frames_queue.pop();
         }
         INF << "Frames queue cleaned for " << m_rs_stream.uid;
@@ -102,12 +101,6 @@ public:
         return frames_queue.size();
     }
 
-    static MemoryPool& get_memory_pool()
-    {
-        static MemoryPool memory_pool_instance = MemoryPool();
-        return memory_pool_instance;
-    }
-
     bool is_enabled;
 
     rs2_video_stream m_rs_stream;
@@ -117,7 +110,8 @@ public:
 private:
     static void frame_deleter(void* p)
     {
-        get_memory_pool().returnMem((unsigned char*)p - sizeof(RsFrameHeader));
+        // this frame buffer is the part of the bigger message with the header
+        delete [] ((unsigned char*)p - sizeof(RsFrameHeader));
     }
 
     rs2::stream_profile m_stream_profile;

@@ -1,15 +1,13 @@
 // License: Apache 2.0. See LICENSE file in root directory.
 // Copyright(c) 2020 Intel Corporation. All Rights Reserved.
 
-#ifndef RS_SINK_H
-#define RS_SINK_H
+#pragma once
 
 #include "BasicUsageEnvironment.hh"
 #include "liveMedia.hh"
 
-#include "rtp_callback.hh"
+#include "RsRtpCallback.h"
 #include <compression/CompressionFactory.h>
-#include <ipDeviceCommon/MemoryPool.h>
 
 #include <librealsense2/hpp/rs_internal.hpp>
 
@@ -19,13 +17,12 @@ public:
     static RsSink* createNew(UsageEnvironment& t_env,
                              MediaSubsession& t_subsession,
                              rs2_video_stream t_stream, // identifies the kind of data that's being received
-                             MemoryPool* t_mempool,
                              char const* t_streamId = NULL); // identifies the stream itself (optional)
 
-    void setCallback(rtp_callback* t_callback);
+    void setCallback(rs_rtp_callback* t_callback);
 
 private:
-    RsSink(UsageEnvironment& t_env, MediaSubsession& t_subsession, rs2_video_stream t_stream, MemoryPool* t_mempool, char const* t_streamId);
+    RsSink(UsageEnvironment& t_env, MediaSubsession& t_subsession, rs2_video_stream t_stream, char const* t_streamId);
     // called only by "createNew()"
     virtual ~RsSink();
 
@@ -47,11 +44,8 @@ private:
     char* m_streamId;
     FILE* m_fp;
 
-    rtp_callback* m_rtpCallback;
+    rs_rtp_callback* m_rtpCallback;
     rs2_video_stream m_stream;
     std::shared_ptr<ICompression> m_iCompress;
-    MemoryPool* m_memPool;
     std::vector<FramedSource::afterGettingFunc*> m_afterGettingFunctions;
 };
-
-#endif // RS_SINK_H
